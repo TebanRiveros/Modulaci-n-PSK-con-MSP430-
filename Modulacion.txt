@@ -1,0 +1,290 @@
+#include <msp430f5529.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define VECTOR_SIZE 32
+#define A     1    //011 1111
+#define B     2    //000 0110
+#define C     3    //101 1011
+#define D     4    //100 1111
+#define E     5    //110 0110
+#define F     6    //110 1101
+#define G     7    //111 1101
+#define H     8    //000 0111
+#define I     9    //111 1111
+#define J     10    //110 1111
+#define K     11    //111 0111
+#define L     12    //111 1100
+#define M     13    //011 1001
+#define N     14    //101 1110
+#define O     15   //111 1001
+#define P     16    //111 0011
+#define Q     17    //011 1111
+#define R     18    //000 0110
+#define S     19    //101 1011
+#define T     20    //100 1111
+#define U     21     //110 0110
+#define V     23    //110 1101
+#define W     24    //111 1101
+#define X     25   //000 0111
+#define Y     26    //111 1111
+#define Z     27    //110 1111
+
+int miVector[VECTOR_SIZE] = {S, I, L, A, V, I, D, A, F, U, E, R, A, E, S, T, A, B, L, E, T, O, D, O, E, L, T, I, E, M, P, O};
+
+uint16_t PWM_DC = 0;
+
+volatile unsigned int recorre=0;
+
+volatile unsigned int bits;
+volatile unsigned int IC;
+volatile unsigned int QC;
+
+bool cero1 = false; // flag to multiplex digit
+bool cero2 = false; // flag to multiplex digit
+
+void main(void)
+{
+    WDTCTL = WDTPW | WDTHOLD;   // stop watchdog timer
+
+    // ENTRADAS
+    // PIN PARA INTERRUPCIÓN POR FLANCO DE SUBIDA
+    P1SEL &= ~(BIT5);
+    P1DIR &= ~(BIT5);
+    P1REN |= (BIT5);
+    P1OUT &= ~(BIT5);
+
+    // CONFIGURACIÓN DE INTERRUPCIÓN POR FLANCO DE SUBIDA
+    P1IE |= BIT5;
+    P1IES &= ~BIT5; // Flanco de subida
+    P1IFG &= ~BIT5;
+
+
+
+
+    //LA OTRA
+    // PIN PARA INTERRUPCIÓN POR FLANCO DE SUBIDA
+    P2SEL &= ~(BIT4);
+    P2DIR &= ~(BIT4);
+    P2REN |= (BIT4);
+    P2OUT &= ~(BIT4);
+
+    // CONFIGURACIÓN DE INTERRUPCIÓN POR FLANCO DE SUBIDA
+    P2IE |= BIT4;
+    P2IES &= ~BIT4; // Flanco de subida
+    P2IFG &= ~BIT4;
+
+
+
+    // ******* Setup clocks 10MHz **********************
+    /*
+    UCSCTL0 = DCO4; // DCO = 16, MOD = 0
+    UCSCTL1 = DCORSEL1; // DCORSEL = 3;
+    UCSCTL2 = FLLD__2|(FLLN0|FLLN2|FLLN3|FLLN4); // N=30 o 29, D=2
+    UCSCTL3 = SELREF_2 | FLLREFDIV_1;  // (FLLREFCLK's frequency)=REFO/n, n=2 y REF0=32768 Hz
+    // DCOCLK source for MCLK (SELM=011) and SMCLK (SELS=011), DCOCKLDIV source for ACLK (SELA=100).
+    UCSCTL4 = (SELM1|SELM0)|(SELS1|SELS0)|(SELA2);
+    //UCSCTL4 = SELM__DCOCLK|SELS__DCOCLK|SELA__DCOCLKDIV;
+    // MCLK=DCOCLK, SMCLK=DCOCLK, ACLK=DCOCLKDIV, ACLK/n=DCOCLKDIV/2
+    UCSCTL5 = DIVM__1 | DIVS__32 | DIVA__1 | DIVPA__2;
+    */
+
+    UCSCTL0 = DCO4; // DCO = 16, MOD = 0
+    UCSCTL1 = DCORSEL2|DCORSEL0; // DCORSEL = 5;
+    UCSCTL2 = FLLD__16|(FLLN0|FLLN2|FLLN5); // N=37 o 29, D=16
+    UCSCTL3 = SELREF_2 | FLLREFDIV_1;  // (FLLREFCLK's frequency)=REFO/n, n=2 y REF0=32768 Hz
+    // DCOCLK source for MCLK (SELM=011) and SMCLK (SELS=011), DCOCKLDIV source for ACLK (SELA=100).
+    UCSCTL4 = (SELM1|SELM0)|(SELS1|SELS0)|(SELA2);
+    // MCLK=DCOCLK, SMCLK=DCOCLK, ACLK=DCOCLKDIV, ACLK/n=DCOCLKDIV/2
+    UCSCTL5 = DIVM__1 | DIVS__1 | DIVA__1 | DIVPA__1;
+    pwm();
+
+    __bis_SR_register(GIE);
+    while (1);
+}
+
+void pwm(void)
+{
+    // ************ GPIO pins for PWM *****************
+    P1SEL |= BIT2 | BIT3;     // P1.2 & P1.3 as TA0.1 and TA0.2 outputs
+    P1DIR |= BIT2 | BIT3;
+
+    //***** Setup Timer_A0 for compare operation************
+    TA0CTL |= TASSEL_2; //  SMCLK/1
+
+    //***** setup TA0 period, TA0.1 and TA0.2 duty cycles
+    TA0CCR0 = 0x1388;       // period = 2*TA0CCR0/SMCLK = 2*5000/(1000000 MHz) = 1ms
+    TA0CCR1 = 5000;       // TA0.1's duty cycle =
+    TA0CCR2 = 5000;       // TA0.2's duty cycle =
+
+    TA0CCTL0 |= CCIE;      // enable CCR0 interrupt to update duty cycles
+    TA0CCTL0 &= ~TAIFG;    // Clear CCR0 TAIFG flag
+
+    TA0CCTL2 |= OUT;      // TA0.2 starts at HIGH level
+
+    //***** Setup output modes for TA0.1 and TA0.2
+    TA0CCTL1 |= OUTMOD2 | OUTMOD1;
+    TA0CCTL2 |= OUTMOD2 | OUTMOD1;
+    __bis_SR_register(LPM1_bits | GIE);
+    TA0CTL |= MC1 | MC0; // Start TA0 in ascending/descending count mode
+}
+
+
+
+
+
+#pragma vector=PORT1_VECTOR
+__interrupt void Port1(void)
+{
+    __bic_SR_register_on_exit(LPM1_bits);
+    cero1 = true;
+    P1IFG &= ~BIT5; // Limpiar bandera de interrupción
+}
+
+#pragma vector=PORT2_VECTOR
+__interrupt void Port2(void)
+{
+    __bic_SR_register_on_exit(LPM1_bits);
+    cero2 = true;
+    P2IFG &= ~BIT4; // Limpiar bandera de interrupción
+}
+
+
+
+#pragma vector=TIMER0_A0_VECTOR
+__interrupt void TIMER0_A0_ISR(void)
+{
+    bits=recorre;
+    switch (bits) {
+      case A:
+        IC = 381;
+        QC = 3087;
+        break;
+      case B:
+        IC = 1464;
+        QC = 1464;
+        break;
+      case C:
+        IC = 3087;
+        QC = 381;
+        break;
+      case D:
+        IC = 5000;
+        QC = 0;
+        break;
+      case E:
+        IC = 1913;
+        QC = 381;
+        break;
+      case F:
+        IC = 3536;
+        QC = 1464;
+        break;
+      case G:
+        IC = 4619;
+        QC = 3087;
+        break;
+      case H:
+        IC = 5000;
+        QC = 5000;
+        break;
+      case I:
+        IC = 4619;
+        QC = 1913;
+        break;
+      case J:
+        IC = 3536;
+        QC = 3536;
+        break;
+      case K:
+        IC = 1913;
+        QC = 4619;
+        break;
+      case L:
+        IC = 0;
+        QC = 5000;
+        break;
+      case M:
+        IC = 3087;
+        QC = 4619;
+        break;
+      case N:
+        IC = 1464;
+        QC = 3536;
+        break;
+      case O:
+        IC = 381;
+        QC = 1913;
+        break;
+      case P:
+        IC = 0;
+        QC = 0;
+        break;
+      case Q:
+        IC = 381;
+        QC = 3087;
+        break;
+      case R:
+        IC = 1464;
+        QC = 1464;
+        break;
+      case S:
+        IC = 3087;
+        QC = 381;
+        break;
+      case T:
+        IC = 5000;
+        QC = 0;
+        break;
+      case U:
+        IC = 1913;
+        QC = 381;
+        break;
+      case V:
+        IC = 3536;
+        QC = 1464;
+        break;
+      case W:
+        IC = 4619;
+        QC = 3087;
+        break;
+      case X:
+        IC = 5000;
+        QC = 5000;
+        break;
+      case Y:
+        IC = 4619;
+        QC = 1913;
+        break;
+      case Z:
+        IC = 3536;
+        QC = 3536;
+        break;
+      default:
+        // instrucciones por defecto si bits no coincide con ningún caso
+        break;
+    }
+
+
+
+    if (cero1 == true) {
+        TA0CCR1 = PWM_DC + IC;
+        //TA0CCR2 = PWM_DC+1000;
+
+    }
+
+    if (cero2 == true) {
+        //TA0CCR1 = PWM_DC + 2500;
+        TA0CCR2 = PWM_DC+QC;
+
+    }
+    recorre=recorre+1;
+    if (recorre>32){
+        recorre=0;
+    }
+
+    TA0CCTL0 &= ~TAIFG;
+    // && cero2 == true
+
+}
